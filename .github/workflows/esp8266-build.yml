@@ -18,4 +18,4 @@ jobs:
           arduino-cli core install esp8266:esp8266@3.1.2 --additional-urls https://arduino.esp8266.com/stable/package_esp8266com_index.json
       - name: Compile for original ESP12E / ESP8266
         run: |
-          arduino-cli compile             --fqbn "esp8266:esp8266:generic:FlashSize=4M2M"             --libraries "$GITHUB_WORKSPACE/libraries"             --warnings default             firmware/a-microReader-v1.2
+          arduino-cli compile             --fqbn "esp8266:esp8266:generic"             --libraries "$GITHUB_WORKSPACE/libraries"             --warnings default             firmware/a-microReader-v1.2
