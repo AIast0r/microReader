@@ -73,6 +73,8 @@ void build() {                     // Билд страницы
     GP.BREAK();
     GP.LABEL(String(F("Файлов в каталоге чтения: ")) + fileCount);
     GP.BREAK();
+    GP.LABEL(String(F("Причина прошлого сброса: ")) + ESP.getResetReason());
+    GP.BREAK();
     GP.LABEL(String(F("Свободно RAM: ")) + ESP.getFreeHeap() + F(" байт"));
     GP.BREAK();
     GP.LABEL(String(F("Наибольший блок RAM: ")) + ESP.getMaxFreeBlockSize() + F(" байт"));
