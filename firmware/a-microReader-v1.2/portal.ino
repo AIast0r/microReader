@@ -30,6 +30,114 @@ static uint16_t deleteAllUserFiles(void) {
   return removed;
 }
 
+
+// HTML-экранирование: имя загруженного файла нельзя вставлять в страницу как HTML.
+static String readerHtmlEscape(const String& in) {
+  String out;
+  out.reserve(in.length() + 16);
+  for (size_t i = 0; i < in.length(); i++) {
+    switch (in[i]) {
+      case '&': out += F("&amp;"); break;
+      case '<': out += F("&lt;"); break;
+      case '>': out += F("&gt;"); break;
+      case '"': out += F("&quot;"); break;
+      case '\'': out += F("&#39;"); break;
+      default: out += in[i]; break;
+    }
+  }
+  return out;
+}
+
+// Вместо штатного GP.FILE_MANAGER с таблицей шире окна выводим адаптивный
+// список. Все операции с файлами выполняются прежним GyverPortal.
+static void readerFileManager() {
+  GP.SEND(F(
+    "<style>"
+    ".mr-list{display:flex;flex-direction:column;gap:6px;width:100%;max-width:100%;margin:10px 0;}"
+    ".mr-file{box-sizing:border-box;display:grid;grid-template-columns:minmax(0,1fr) auto;"
+    "align-items:center;gap:7px;width:100%;max-width:100%;border-radius:9px;"
+    "background:#242831;padding:7px 9px;text-align:left;}"
+    ".mr-info{min-width:0;overflow-wrap:anywhere;word-break:break-word;}"
+    ".mr-name{color:#63d778;font-size:14px;text-decoration:none;line-height:1.35;}"
+    ".mr-size{display:block;color:#aeb4be;font-size:12px;margin-top:2px;}"
+    ".mr-actions{display:flex;flex-wrap:nowrap;gap:3px;align-items:center;}"
+    ".mr-action{box-sizing:border-box;border:0;border-radius:6px;min-width:30px;"
+    "height:30px;padding:2px 5px;background:#38404b;color:#fff;"
+    "font-size:17px;text-align:center;text-decoration:none;cursor:pointer;}"
+    ".mr-action.mr-danger{background:#6f313b;color:#fff;}"
+    ".mr-protected{color:#aeb4be;font-size:12px;}"
+    ".mr-usage{color:#adb6c3;text-align:center;font-size:13px;margin:10px 0 14px;}"
+    ".mr-warning{font-size:13px;line-height:1.4;color:#d0d4de;margin:10px 0;overflow-wrap:anywhere;}"
+    ".mr-dangerform{width:100%;max-width:100%;box-sizing:border-box;}"
+    ".mr-dangerform input[type=submit]{max-width:100%;white-space:normal;font-size:15px;}"
+    ".mr-checklabel{font-size:13px;line-height:1.35;overflow-wrap:anywhere;}"
+    "@media(max-width:380px){.mr-file{gap:4px;padding:7px 5px;}"
+    ".mr-action{min-width:27px;height:28px;padding:1px 4px;}}"
+    "</style>"
+    "<script>"
+    "function mrDelFile(el){var p=el.getAttribute('data-path');"
+    "if(confirm('Удалить '+p+'?'))GP_send('/GP_delete?'+encodeURIComponent(p),1);}"
+    "function mrRenFile(el){var p=el.getAttribute('data-path');"
+    "var n=prompt('Новое имя файла:',p.slice(p.lastIndexOf('/')+1));"
+    "if(n===null)return;n=n.trim();"
+    "if(!n||n.includes('/')||n.includes('\\\\')){alert('Укажите имя без / и обратного слеша');return;}"
+    "GP_send('/GP_rename?'+encodeURIComponent(p)+'='+encodeURIComponent('/'+n),1);}"
+    "</script>"
+    "<div class='mr-list'>"
+  ));
+
+  Dir dir = LittleFS.openDir("/");
+  uint16_t count = 0;
+  while (dir.next()) {
+    if (!dir.isFile()) continue;
+    String name = dir.fileName();
+    if (!name.startsWith("/")) name = "/" + name;
+    const String safe = readerHtmlEscape(name);
+    const bool protectedFile = (name == "/data.dat");
+
+    String line;
+    line.reserve(safe.length() * 3 + 320);
+    line += F("<div class='mr-file'><div class='mr-info'><a class='mr-name' href='");
+    line += safe;
+    line += F("' download>");
+    line += safe;
+    line += F("</a><small class='mr-size'>");
+    line += String(dir.fileSize() / 1024.0, 1);
+    line += F(" KiB</small></div>");
+    if (protectedFile) {
+      line += F("<span class='mr-protected'>Настройки</span>");
+    } else {
+      line += F("<div class='mr-actions'><button type='button' class='mr-action'"
+                " title='Переименовать' data-path='");
+      line += safe;
+      line += F("' onclick='mrRenFile(this)'>✎</button><a class='mr-action' title='Скачать' href='");
+      line += safe;
+      line += F("' download>↓</a><button type='button' class='mr-action mr-danger'"
+                " title='Удалить' data-path='");
+      line += safe;
+      line += F("' onclick='mrDelFile(this)'>×</button></div>");
+    }
+    line += F("</div>");
+    GP.SEND(line);
+    count++;
+    yield();
+  }
+  GP.SEND(F("</div>"));
+  if (!count) GP.SEND(F("<p class='mr-usage'>Файлов пока нет</p>"));
+
+  FSInfo fsi;
+  if (LittleFS.info(fsi) && fsi.totalBytes) {
+    String usage = F("<div class='mr-usage'>Память: ");
+    usage += String(fsi.usedBytes / 1024.0, 1);
+    usage += F(" / ");
+    usage += String(fsi.totalBytes / 1024.0, 1);
+    usage += F(" KiB (");
+    usage += String((unsigned long)fsi.usedBytes * 100UL / fsi.totalBytes);
+    usage += F("%)</div>");
+    GP.SEND(usage);
+  }
+}
+
 /* ======================================================================= */
 /* ================= Билд веб-страницы + подсос значений ================= */
 void build() {                     // Билд страницы
@@ -64,13 +172,18 @@ void build() {                     // Билд страницы
   M_BLOCK_TAB(                   // Блок с файловым менеджером
     "Файловая система",          // Имя + тип DIV
     GP.FILE_UPLOAD("file_upl");  // Кнопка для загрузки файла
-    GP.FILE_MANAGER(&LittleFS);  // Файловый менеджер
+    readerFileManager();            // Компактный адаптивный список
     GP.HR();
-    GP.LABEL("Массовое удаление: только файлы книг и формул. Настройки сохраняются.");
+    GP.SEND(F("<div class='mr-warning'>Удаление затрагивает только документы "
+              "(.txt, .md, .tex, изображения). Настройки устройства сохраняются.</div>"));
+    GP.SEND(F("<div class='mr-dangerform'>"));
     GP.FORM_BEGIN("/delete_user_files");
-    M_BOX(GP_CENTER, GP.CHECK("confirm_delete", false); GP.LABEL("Подтверждаю удаление всех пользовательских файлов"););
-    GP.SUBMIT("Удалить все пользовательские файлы");
+    M_BOX(GP_CENTER, GP.CHECK("confirm_delete", false);
+          GP.SEND(F("<span class='mr-checklabel'>Подтверждаю удаление всех документов</span>")););
+    GP.BREAK();
+    GP.SUBMIT("Удалить все документы");
     GP.FORM_END();
+    GP.SEND(F("</div>"));
     if (lastBulkDeleteCount) GP.LABEL(String("Удалено файлов: ") + lastBulkDeleteCount);
   );
   GP.BUILD_END();                  // Конец билда страницы
