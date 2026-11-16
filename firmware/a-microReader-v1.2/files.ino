@@ -10,7 +10,7 @@ void checkFileSystem(void) {           // Проверка и индексаци
     File file = root.openFile("r");    // Открываем файл для чтения
     if (file) {                        // Если файл существует
       su::Text filename(file.name());  // Создаем строку с именем
-      if ((filename.lengthUnicode() < MAX_FILENAME_LEN + 5) && (filename.endsWith(".txt") || filename.endsWith(".itxt") || filename.endsWith(".h") || filename.endsWith(".jpg"))) {
+      if ((filename.lengthUnicode() < MAX_FILENAME_LEN + 5) && (filename.endsWith(".txt") || filename.endsWith(".md") || filename.endsWith(".tex") || filename.endsWith(".itxt") || filename.endsWith(".h") || filename.endsWith(".jpg"))) {
         fileCount++;                   // Нормальный файл (Имя короткое, тип .txt / .itxt / .h / .jpg)
         fileNames += "/";              // + /
         fileNames += root.fileName();  // + Имя файла
@@ -213,3 +213,15 @@ uint8_t parseItxt(uint8_t *img, File file) {
   return 1;                                     // не насобирали - ошибка
 }
 /* ======================================================================= */
+
+// Удержание OK служит выходом из режима формул. Сбрасываем событие,
+// чтобы после возврата в главное меню не сработало открытие Wi-Fi.
+void waitOkRelease(void) {
+  uint32_t started = millis();
+  while (digitalRead(OK_BTN_PIN) == LOW && millis() - started < 5000UL) {
+    delay(5);
+    yield();
+  }
+  ok.tick();
+  ok.tick();
+}

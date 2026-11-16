@@ -1,3 +1,35 @@
+// Счётчик удалённых файлов для отображения в веб-интерфейсе.
+static uint16_t lastBulkDeleteCount = 0;
+
+// Не затрагиваем внутренний /data.dat с настройками и рекордами игр.
+// На удаление допускаем только читаемые пользовательские файлы.
+static bool isUserFileToDelete(const String& path) {
+  return path.endsWith(".txt") || path.endsWith(".md") || path.endsWith(".tex") ||
+         path.endsWith(".itxt") || path.endsWith(".h") ||
+         path.endsWith(".jpg");
+}
+
+static uint16_t deleteAllUserFiles(void) {
+  uint16_t removed = 0;
+  // Открываем каталог заново после каждого удаления: на LittleFS итератор
+  // может пропускать элементы при изменении списка во время обхода.
+  for (uint16_t attempts = 0; attempts < 512; ++attempts) {
+    Dir root = LittleFS.openDir("/");
+    String target;
+    while (root.next()) {
+      String candidate = root.fileName();
+      if (!candidate.startsWith("/")) candidate = "/" + candidate;
+      if (isUserFileToDelete(candidate)) { target = candidate; break; }
+    }
+    if (!target.length() || !LittleFS.remove(target)) break;
+    removed++;
+    yield();
+  }
+  checkFileSystem();
+  cursor = 0;
+  return removed;
+}
+
 /* ======================================================================= */
 /* ================= Билд веб-страницы + подсос значений ================= */
 void build() {                     // Билд страницы
@@ -33,11 +65,24 @@ void build() {                     // Билд страницы
     "Файловая система",          // Имя + тип DIV
     GP.FILE_UPLOAD("file_upl");  // Кнопка для загрузки файла
     GP.FILE_MANAGER(&LittleFS);  // Файловый менеджер
+    GP.HR();
+    GP.LABEL("Массовое удаление: только файлы книг и формул. Настройки сохраняются.");
+    GP.FORM_BEGIN("/delete_user_files");
+    M_BOX(GP_CENTER, GP.CHECK("confirm_delete", false); GP.LABEL("Подтверждаю удаление всех пользовательских файлов"););
+    GP.SUBMIT("Удалить все пользовательские файлы");
+    GP.FORM_END();
+    if (lastBulkDeleteCount) GP.LABEL(String("Удалено файлов: ") + lastBulkDeleteCount);
   );
   GP.BUILD_END();                  // Конец билда страницы
 }
 
 void action(GyverPortal& p) {      // Подсос значений со страницы
+  if (p.form("/delete_user_files")) {
+    bool confirmed = false;
+    p.copyBool("confirm_delete", confirmed);
+    if (confirmed) lastBulkDeleteCount = deleteAllUserFiles();
+  }
+
   if (p.form("/cfg")) {            // Если есть сабмит формы - копируем все в переменные
     p.copyStr("apSsid", sets.apSsid);
     p.copyStr("apPass", sets.apPass);

@@ -97,6 +97,10 @@ uint8_t WIDTH = (64/SEGMENT - 16/SEGMENT);          // -1 (для текста) 
 uint8_t HEIGHT = (128/SEGMENT);                     // и высота
 /* =========================================== */
 
+void enterToReadTexFile(void);  // TeX-формулы из .tex (порт с ESP32-C3)
+void enterToReadMdFile(void);   // текст и TeX-формулы в одном .md
+void waitOkRelease(void);      // защита от повторного срабатывания удержания OK
+
 void setup() {
   Serial.begin(115200);
   pinMode(LED_BUILTIN, OUTPUT);         // Лед на модуле как выход
@@ -191,6 +195,10 @@ void loop() {
     if (fileCount) {
       if (selectedFile.endsWith(".txt")) {  // Если файл - текстовый
         enterToReadTxtFile();               // Читаем как текст
+      } else if (selectedFile.endsWith(".tex")) {  // отдельные страницы с формулами
+        enterToReadTexFile();
+      } else if (selectedFile.endsWith(".md")) {  // текст вперемешку с формулами
+        enterToReadMdFile();
       } else if (selectedFile.endsWith(".itxt") || selectedFile.endsWith(".h")) {  // Если битмап
         enterToReadBmpFile();               // Читаем как картинку
       } else if (selectedFile.endsWith(".jpg")) {
