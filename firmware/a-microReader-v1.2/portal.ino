@@ -175,9 +175,140 @@ static void readerFilesPage() {
   GP.BUILD_END();
 }
 
+
+// The browser owns the list: ESP only renders five file rows per HTTP request.
+// Keep this in flash to avoid allocating a multi-kilobyte String on ESP8266.
+static const char readerInlineFilesHtml[] PROGMEM = R"MRFILES(
+<style>
+.rf-list{display:flex;flex-direction:column;gap:5px;min-width:0;width:100%;box-sizing:border-box;margin:10px 0;}
+.rf-row{display:flex;align-items:center;gap:6px;max-width:100%;width:100%;box-sizing:border-box;
+  background:#242830;border-radius:7px;padding:7px 6px;text-align:left;}
+.rf-name{flex:1 1 0;min-width:0;overflow-wrap:anywhere;word-break:break-word;}
+.rf-name a{font-size:14px;color:#5fcb7e;text-decoration:none;}
+.rf-name small{display:block;font-size:11px;color:#aeb3bf;margin-top:3px;}
+.rf-acts{flex:none;display:flex;align-items:center;gap:3px;}
+.rf-acts button,.rf-acts a{cursor:pointer;border:0;text-decoration:none;border-radius:5px;
+  min-width:28px;height:29px;box-sizing:border-box;padding:2px 4px;display:inline-flex;
+  align-items:center;justify-content:center;color:white;background:#39404d;font-size:16px;}
+.rf-status{font-size:12px;color:#aeb3bf;text-align:center;margin:8px 0 12px;overflow-wrap:anywhere;}
+.rf-retry{background:#43874e;border:0;border-radius:5px;padding:7px;color:white;cursor:pointer;}
+</style>
+<div id="rf-inline" class="rf-list"></div>
+<div id="rf-status" class="rf-status">Загрузка списка файлов…</div>
+<div style="text-align:center"><button type="button" id="rf-retry" class="rf-retry"
+style="display:none" onclick="rfRetry()">Повторить загрузку</button></div>
+<script>
+(function(){
+  // Keep only five files per device request and wait until each request is done.
+  var page=0,loaded=0,busy=false,done=false;
+  var list=document.getElementById('rf-inline');
+  var status=document.getElementById('rf-status');
+  var retry=document.getElementById('rf-retry');
+  window.rfDelete=function(button){
+    var path=button.getAttribute('data-path');
+    if(confirm('Удалить '+path+'?')) GP_send('/GP_delete?'+encodeURIComponent(path),1);
+  };
+  window.rfRename=function(button){
+    var path=button.getAttribute('data-path');
+    var name=prompt('Новое имя файла',path.substring(path.lastIndexOf('/')+1));
+    if(name===null)return;
+    name=name.trim();
+    if(!name || name.indexOf('/')>=0 || name.indexOf('\\')>=0){
+      alert('Имя не должно содержать слеши');return;
+    }
+    GP_send('/GP_rename?'+encodeURIComponent(path)+'='+encodeURIComponent('/'+name),1);
+  };
+  window.rfRetry=function(){retry.style.display='none';loadNext();};
+  function loadNext(){
+    if(busy||done)return;
+    busy=true;
+    status.textContent='Загрузка файлов… ('+loaded+')';
+    fetch('/filechunk/'+page,{cache:'no-store'}).then(function(response){
+      if(!response.ok)throw Error('HTTP '+response.status);
+      return response.text();
+    }).then(function(html){
+      var content=document.createElement('template');
+      content.innerHTML=html;
+      var chunk=content.content.querySelector('.rf-chunk');
+      var more=content.content.querySelector('[data-rf-more]');
+      if(!chunk||!more)throw Error('Неполный ответ ESP8266');
+      var n=chunk.querySelectorAll('.rf-row').length;
+      while(chunk.firstChild)list.appendChild(chunk.firstChild);
+      loaded+=n;
+      page++;
+      busy=false;
+      if(more.getAttribute('data-rf-more')==='1'&&page<=50){
+        status.textContent='Загружено '+loaded+' файлов';
+        setTimeout(loadNext,300);
+      } else {
+        done=true;
+        status.textContent=loaded?'Всего файлов: '+loaded:'Файлов нет';
+      }
+    }).catch(function(err){
+      busy=false;
+      status.textContent='Ошибка списка: '+err.message;
+      retry.style.display='inline-block';
+    });
+  }
+  // Even if the rest of the page is large, file listing starts only after
+  // the document has fully arrived in the browser.
+  if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',loadNext);
+  else setTimeout(loadNext,0);
+})();
+</script>
+)MRFILES";
+
+// /filechunk/<page> outputs only five rows, no CSS, title, or full HTML page.
+// The previously tested /files/<page> view is retained as a recovery option.
+static void readerFileChunk() {
+  const uint8_t pageSize = 5;
+  long page = ui.uri().substring(11).toInt(); // length of "/filechunk/"
+  if (page < 0 || page > 50) page = 0;
+  uint16_t first = static_cast<uint16_t>(page) * pageSize;
+  uint16_t index = 0;
+  uint8_t rendered = 0;
+  bool more = false;
+  GP.SEND(F("<div class='rf-chunk'>"));
+  Dir root = LittleFS.openDir("/");
+  while (root.next()) {
+    if (!root.isFile()) continue;
+    String fullPath = root.fileName();
+    if (!fullPath.startsWith("/")) fullPath = "/" + fullPath;
+    if (!isUserFileToDelete(fullPath)) continue;
+    if (index++ < first) continue;
+    if (rendered == pageSize) { more = true; break; }
+    readerFileRow(fullPath, root.fileSize());
+    rendered++;
+    yield();
+  }
+  GP.SEND(F("</div><span data-rf-more='"));
+  GP.SEND(more ? F("1") : F("0"));
+  GP.SEND(F("'></span>"));
+}
+
+// Apply left-hand mode immediately without a reboot. The original code only
+// applied OLED rotation and button remapping in setup(), so web changes
+// appeared to do nothing until the next power cycle.
+static void applyLeftHandedMode() {
+  oled.flipH(sets.leftmode);
+  oled.flipV(sets.leftmode);
+
+  up = Button(sets.leftmode ? DWN_BTN_PIN : UP_BTN_PIN);
+  down = Button(sets.leftmode ? UP_BTN_PIN : DWN_BTN_PIN);
+  up.setHoldTimeout(1500);
+  up.setStepTimeout(100);
+  down.setStepTimeout(100);
+
+  Serial.printf_P(PSTR("[CFG] left-hand mode=%u\n"), (unsigned)sets.leftmode);
+}
+
 /* ======================================================================= */
 /* ================= Билд веб-страницы + подсос значений ================= */
 void build() {                     // Билд страницы
+  if (ui.uri().startsWith(F("/filechunk/"))) {
+    readerFileChunk();
+    return;
+  }
   if (ui.uri().startsWith(F("/files"))) {
     readerFilesPage();
     return;
@@ -218,8 +349,10 @@ void build() {                     // Билд страницы
     // DIAGNOSTIC: temporarily skip the complete filesystem HTML table.
     // This separates low-heap page generation from Wi-Fi / OTA crashes.
     // File upload, OTA, settings and confirmed bulk delete still work.
-    GP.BUTTON_LINK(F("/files/0"), F("Управление файлами (по 5)"));
-    GP.LABEL(F("Диагностика: список файлов временно отключён"));
+    // Main page remains small: browser fetches five files at a time.
+    GP.LABEL(F("Документы"));
+    GP.SEND_P(readerInlineFilesHtml);
+    GP.LABEL(F("Отладка ESP8266"));
     GP.BREAK();
     GP.LABEL(String(F("Файлов в каталоге чтения: ")) + fileCount);
     GP.BREAK();
@@ -244,6 +377,17 @@ void build() {                     // Билд страницы
 }
 
 void action(GyverPortal& p) {      // Подсос значений со страницы
+  // GP.SWITCH() uses /GP_click when toggled. Process it immediately rather
+  // than relying on an unrelated form submission.
+  if (p.click("leftEn")) {
+    bool requested = sets.leftmode;
+    if (p.copyBool("leftEn", requested) && requested != sets.leftmode) {
+      sets.leftmode = requested;
+      applyLeftHandedMode();
+      data.update();  // delayed LittleFS write, as for other settings
+    }
+  }
+
   if (p.form("/delete_user_files")) {
     bool confirmed = false;
     p.copyBool("confirm_delete", confirmed);
@@ -256,7 +400,9 @@ void action(GyverPortal& p) {      // Подсос значений со стр�
     p.copyStr("staSsid", sets.staSsid);
     p.copyStr("staPass", sets.staPass);
     p.copyBool("staEn", sets.staModeEn);
+    const bool previousLeftMode = sets.leftmode;
     p.copyBool("leftEn", sets.leftmode);
+    if (previousLeftMode != sets.leftmode) applyLeftHandedMode();
     p.copyInt("con", sets.dispContrast);
     byte con = map(sets.dispContrast, 10, 100, 1, 255);
     oled.setContrast(con);            // Тут же задаем яркость оледа
