@@ -10,7 +10,7 @@
 struct MdPage {
   uint32_t start;
   uint32_t end;
-  uint8_t kind;                   // 0 = UTF-8 text; 1 = "tex:" formula
+  uint8_t kind;                   // 0 = text, 1 = tex:, 2 = draw:
 };
 static MdPage mdPages[MD_MAX_PAGES];
 static uint16_t mdCount = 0;
@@ -57,6 +57,102 @@ static uint32_t mdReadCodepoint(File& file) {
   return cp;
 }
 
+// A standalone diagram page uses ASCII drawing commands, all coordinates
+// measured in physical 128x64 OLED pixels. Never allocate a framebuffer.
+static bool mdIsDrawLine(File& file) {
+  const uint32_t pos = file.position();
+  const bool yes = file.read() == 'd' && file.read() == 'r' &&
+                   file.read() == 'a' && file.read() == 'w' &&
+                   file.read() == ':';
+  file.seek(pos);
+  return yes;
+}
+
+static bool mdDrawEnd(File& file) {
+  const uint32_t pos = file.position();
+  const char end[] = "enddraw";
+  bool yes = true;
+  for (uint8_t i = 0; i < 7; i++) {
+    if (file.read() != end[i]) { yes = false; break; }
+  }
+  if (yes) {
+    int ch = file.read();
+    yes = ch == '\n' || ch == '\r' || ch == -1;
+  }
+  file.seek(pos);
+  return yes;
+}
+
+static int16_t mdNum(char*& p) {
+  while (*p == ' ') ++p;
+  int16_t value = (int16_t)atoi(p);
+  if (*p == '-' || *p == '+') ++p;
+  while (*p >= '0' && *p <= '9') ++p;
+  return value;
+}
+
+static void mdDrawDiagram(File& file, uint16_t index) {
+  const MdPage& page = mdPages[index];
+  file.seek(page.start);
+  oled.autoPrintln(false);
+  oled.clear();
+  // Skip "draw:" header, read commands directly from LittleFS.
+  while (file.available() && file.read() != '\n') {}
+  uint8_t commands = 0;
+  while (file.available() && file.position() < page.end && commands++ < 48) {
+    char cmd[112] = {0};
+    uint8_t len = 0;
+    while (file.available() && file.position() < page.end) {
+      int c = file.read();
+      if (c == '\n') break;
+      if (c != '\r' && len < sizeof(cmd) - 1) cmd[len++] = (char)c;
+    }
+    if (strcmp(cmd, "enddraw") == 0) break;
+    char* p = strchr(cmd, ' ');
+    if (!p) continue;
+    *p++ = '\0';
+    int16_t x = mdNum(p), y = mdNum(p);
+    // Coordinates are bounded before rasterization, preventing huge offscreen
+    // loops from malformed files.
+    if (x < 0 || x > 127 || y < 0 || y > 63) continue;
+    if (strcmp(cmd, "text") == 0) {
+      while (*p == ' ') ++p;
+      oled.setCursorXY(x, y);
+      while (*p) {
+        uint8_t c = (uint8_t)*p++;
+        oled.write(c); // UTF-8 decoder in the existing GyverOLED font
+      }
+    } else {
+      int16_t a = mdNum(p);
+      if (strcmp(cmd, "circle") == 0) {
+        if (a > 0 && a <= 63) oled.circle(x, y, a, OLED_STROKE);
+      } else {
+        int16_t b = mdNum(p);
+        if (a < 0 || a > 127 || b < 0 || b > 63) continue;
+        if (strcmp(cmd, "line") == 0) oled.line(x, y, a, b);
+        else if (strcmp(cmd, "rect") == 0) oled.rect(x, y, a, b, OLED_STROKE);
+        else if (strcmp(cmd, "arrow") == 0) {
+          oled.line(x, y, a, b);
+          const float dx = a - x, dy = b - y;
+          const float mag = sqrtf(dx * dx + dy * dy);
+          if (mag > 0.1f) {
+            const float ux = dx / mag, uy = dy / mag;
+            int16_t x1 = (int16_t)roundf(a - 6 * ux - 3 * uy);
+            int16_t y1 = (int16_t)roundf(b - 6 * uy + 3 * ux);
+            int16_t x2 = (int16_t)roundf(a - 6 * ux + 3 * uy);
+            int16_t y2 = (int16_t)roundf(b - 6 * uy - 3 * ux);
+            oled.line(a, b, x1, y1);
+            oled.line(a, b, x2, y2);
+          }
+        }
+      }
+    }
+    yield();
+  }
+  oled.update();
+  oled.autoPrintln(true);
+}
+
 static void mdIndex(File& file, bool allowTeX) {
   file.seek(0);
   mdCount = mdCurrent = 0;
@@ -75,6 +171,29 @@ static void mdIndex(File& file, bool allowTeX) {
     }
 
     const uint32_t pos = file.position();
+    if (allowTeX && physicalLineStart && mdIsDrawLine(file)) {
+      if (hasText) mdPush(pageStart, pos, 0);
+      // A malformed draw block must not consume the rest of the document:
+      // cap it at 48 lines; a missing enddraw resumes normal text paging.
+      uint8_t commands = 0;
+      while (file.available() && commands++ < 48) {
+        const uint32_t commandPos = file.position();
+        if (mdDrawEnd(file)) {
+          while (file.available() && file.read() != '\n') {}
+          break;
+        }
+        while (file.available() && file.read() != '\n') {}
+        yield();
+        if (file.position() <= commandPos) break;
+      }
+      mdPush(pos, file.position(), 2);
+      pageStart = file.position();
+      row = col = 0;
+      hasText = false;
+      physicalLineStart = true;
+      continue;
+    }
+
     if (allowTeX && physicalLineStart && mdIsTexLine(file)) {
       if (hasText) mdPush(pageStart, pos, 0);
       while (file.available() && file.read() != '\n') {
@@ -192,6 +311,7 @@ static void mdDrawFormula(File& file, uint16_t index) {
 static void mdDrawCurrent(File& file) {
   if (mdCurrent >= mdCount) return;
   if (mdPages[mdCurrent].kind == 1) mdDrawFormula(file, mdCurrent);
+  else if (mdPages[mdCurrent].kind == 2) mdDrawDiagram(file, mdCurrent);
   else mdDrawText(file, mdCurrent);
 }
 
