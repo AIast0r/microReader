@@ -94,7 +94,7 @@ static uint8_t readerGlyphIndex(uint32_t codepoint) {
 void readerDrawCompactGlyph(uint32_t codepoint, uint8_t x, uint8_t y) {
   uint8_t glyph = readerGlyphIndex(codepoint);
   if (readerFontMode == 3) {
-    // Four ink pixels wide, six high; all glyphs (incl. Russian) are in flash.
+    // Three ink pixels + one spacer, six high; Cyrillic lives in flash.
     for (uint8_t col = 0; col < 4; col++) {
       uint8_t bits = pgm_read_byte(&readerTinyGlyphs[glyph][col]);
       for (uint8_t row = 0; row < 6; row++) {
