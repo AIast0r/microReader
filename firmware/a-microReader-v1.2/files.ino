@@ -22,51 +22,10 @@ void checkFileSystem(void) {           // Проверка и индексаци
 
 /* ======================================================================= */
 /* ============================ Чтение файла ============================= */
-void drawPage(File file) {        // Отрисовка страницы на олед
-  if (!file.available()) return;  // Если файл кончился - не выводим
-  oled.clear();
-  oled.home();                                 // Очистка и установка в начало дисплея
-  while (!oled.isEnd() && file.available()) {  // Выводим символы пока не кончился дисплей или файл
-    oled.write(file.read());                   // Транслируем символы в дисплей
-  }
-  oled.update();  // Выводим картинку
-}
-
-void enterToReadTxtFile(void) {        // Режим чтения файла
-  String fn = ("/" + selectedFile);    // Собираем путь до файла
-  File file = LittleFS.open(fn, "r");  // Открываем файл
-  if (!file) {                         // Если сам файл не порядке
-    fileReadError();
-    checkFileSystem();  // Чекаем файловую систему
-    drawMainMenu();     // Рисуем главное меню
-    file.close();       // Закрываем файл
-    return;             // Выходим
-  }
-
-  drawPage(file);          // Если с файлом все ок - рисуем первую страницу
-  while (1) {              // Бесконечный цикл
-    up.tick();
-    ok.tick();
-    down.tick();           // Опрос кнопок
-    if (ok.click()) {      // Если ок нажат
-      uiTimer = millis();  // Сбрасываем таймер дисплея
-      drawMainMenu();      // Рисуем главное меню
-      file.close();        // Закрываем файл
-      return;              // Выходим
-    }
-
-    if (up.click() or up.step()) {             // Если нажата или удержана вверх
-      uiTimer = millis();                      // Сбрасываем таймер дисплея
-      long pos = file.position() - 500;        // Смещаем положение файла вверх
-      if (pos < 0) pos = 0;                    // Если достигли нуля - не идем дальше
-      file.seek(pos);                          // Устанавливаем указатель файла
-      drawPage(file);                          // Рисуем страницу
-    } else if (down.click() or down.step()) {  // Если нажата или удержана вниз
-      uiTimer = millis();                      // Сбрасываем таймер дисплея
-      drawPage(file);                          // Рисуем страницу
-    }
-    yield();  // Внутренний поллинг ESP
-  }
+// TXT and MD share the same font-aware, UTF-8-safe page index.
+// The old 500-byte rewind did not match the visible page size.
+void enterToReadTxtFile(void) {
+  enterToReadTextFile(false);
 }
 
 void enterToReadBmpFile(void) {
