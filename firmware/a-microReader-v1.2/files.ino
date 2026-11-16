@@ -10,7 +10,7 @@ void checkFileSystem(void) {           // Проверка и индексаци
     File file = root.openFile("r");    // Открываем файл для чтения
     if (file) {                        // Если файл существует
       su::Text filename(file.name());  // Создаем строку с именем
-      if ((filename.lengthUnicode() < MAX_FILENAME_LEN + 5) && (filename.endsWith(".txt") || filename.endsWith(".tex") || filename.endsWith(".itxt") || filename.endsWith(".h") || filename.endsWith(".jpg"))) {
+      if ((filename.lengthUnicode() < MAX_FILENAME_LEN + 5) && (filename.endsWith(".txt") || filename.endsWith(".md") || filename.endsWith(".tex") || filename.endsWith(".itxt") || filename.endsWith(".h") || filename.endsWith(".jpg"))) {
         fileCount++;                   // Нормальный файл (Имя короткое, тип .txt / .itxt / .h / .jpg)
         fileNames += "/";              // + /
         fileNames += root.fileName();  // + Имя файла
