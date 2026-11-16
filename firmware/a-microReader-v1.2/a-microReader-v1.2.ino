@@ -99,6 +99,10 @@ uint8_t HEIGHT = (128/SEGMENT);                     // и высота
 
 void enterToReadTexFile(void);  // TeX-формулы из .tex (порт с ESP32-C3)
 void enterToReadMdFile(void);   // текст и TeX-формулы в одном .md
+void enterToReadTextFile(bool allowTeX); // shared TXT/MD reader
+void readerLoadFont(void);              // read /font.dat after LittleFS mounts
+extern uint8_t readerFontMode;            // selected font mode, separate from sets
+bool readerSetFont(uint8_t mode);        // handle web setting without changing data.dat
 void waitOkRelease(void);      // защита от повторного срабатывания удержания OK
 
 void setup() {
@@ -135,6 +139,7 @@ void setup() {
     EEPROM.get(1, sets);           // Читаем настройки
   }*/
   data.read();  // это заменяет то, что выше
+  readerLoadFont(); // independent text font preference, keeps /data.dat unchanged
 
   while (!oled.init(IIC_SDA_PIN, IIC_SCL_PIN)) {  // Инициализация оледа
     digitalWrite(LED_BUILTIN, LOW);               // Медленно мигаем пока не проинициализируем олед
