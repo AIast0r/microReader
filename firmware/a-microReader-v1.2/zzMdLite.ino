@@ -173,6 +173,7 @@ void enterToReadMdFile(void) {
   mdIndex(file);
   if (!mdCount) {
     file.close();
+    texReleasePool();
     drawMainMenu();
     return;
   }
@@ -186,6 +187,7 @@ void enterToReadMdFile(void) {
       uiTimer = millis();
       drawMainMenu();
       file.close();
+      texReleasePool();
       return;
     }
     if (ok.click() && mdPages[mdCurrent].kind == 1 && (texMaxX || texMaxY)) {
