@@ -6,7 +6,7 @@
  * engine. Text is paginated at 21 UTF-8 characters x 8 rows.
  * No Markdown tables/graphs or rich formatting: keep SRAM use predictable.
  */
-#define MD_MAX_PAGES 160
+#define MD_MAX_PAGES 96
 #define MD_COLS 21
 #define MD_ROWS 8
 
