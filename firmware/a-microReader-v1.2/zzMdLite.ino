@@ -1,134 +1,167 @@
 /*
- * Lightweight mixed text + TeX reader for ESP8266 (independent implementation).
- *
- * .md content can contain normal UTF-8 text and lines beginning with "tex:".
- * A tex: line occupies its own page and is rendered with the imported TeX
- * engine. Text is paginated at 21 UTF-8 characters x 8 rows.
- * No Markdown tables/graphs or rich formatting: keep SRAM use predictable.
+ * Shared UTF-8 paginator for .md and .txt.
+ * A .md "tex:" line remains an independent TeX-rendered page.
+ * Both formats now use the same font-dependent line width/height and exact
+ * page byte offsets, including backwards navigation. This avoids the old
+ * "file.position() - 500" TXT rewind and mid-glyph page boundaries.
  */
 #define MD_MAX_PAGES 96
-#define MD_COLS 21
-#define MD_ROWS 8
 
 struct MdPage {
   uint32_t start;
   uint32_t end;
-  uint8_t kind;                   // 0 = UTF-8 text, 1 = tex: formula
+  uint8_t kind;                   // 0 = UTF-8 text; 1 = "tex:" formula
 };
 static MdPage mdPages[MD_MAX_PAGES];
 static uint16_t mdCount = 0;
 static uint16_t mdCurrent = 0;
+static bool mdTruncated = false;
 
 static void mdPush(uint32_t start, uint32_t end, uint8_t kind) {
-  if (mdCount < MD_MAX_PAGES && end > start) {
+  if (end <= start) return;
+  if (mdCount < MD_MAX_PAGES) {
     mdPages[mdCount].start = start;
     mdPages[mdCount].end = end;
     mdPages[mdCount].kind = kind;
     mdCount++;
+  } else {
+    mdTruncated = true;
   }
 }
 
 static bool mdIsTexLine(File& file) {
-  uint32_t p = file.position();
-  bool isTex = file.read() == 't' &&
-               file.read() == 'e' &&
-               file.read() == 'x' &&
-               file.read() == ':';
-  file.seek(p);
+  const uint32_t pos = file.position();
+  const bool isTex = file.read() == 't' && file.read() == 'e' &&
+                     file.read() == 'x' && file.read() == ':';
+  file.seek(pos);
   return isTex;
 }
 
-// UTF-8 lead byte length. Incomplete code points are treated as one glyph.
-static uint8_t mdUtf8Bytes(uint8_t c) {
-  if ((c & 0xE0) == 0xC0) return 2;
-  if ((c & 0xF0) == 0xE0) return 3;
-  if ((c & 0xF8) == 0xF0) return 4;
-  return 1;
+// Decode exactly one UTF-8 codepoint without cutting Cyrillic across pages.
+static uint32_t mdReadCodepoint(File& file) {
+  int value = file.read();
+  if (value < 0) return 0;
+  uint8_t lead = (uint8_t)value;
+  if (lead < 0x80) return lead;
+  uint32_t cp = 0;
+  uint8_t extra = 0;
+  if ((lead & 0xE0) == 0xC0) { cp = lead & 0x1F; extra = 1; }
+  else if ((lead & 0xF0) == 0xE0) { cp = lead & 0x0F; extra = 2; }
+  else if ((lead & 0xF8) == 0xF0) { cp = lead & 0x07; extra = 3; }
+  else return '?';
+  for (uint8_t i = 0; i < extra; i++) {
+    int next = file.read();
+    if (next < 0 || (((uint8_t)next & 0xC0) != 0x80)) return '?';
+    cp = (cp << 6) | ((uint8_t)next & 0x3F);
+  }
+  return cp;
 }
 
-static void mdIndex(File& file) {
+static void mdIndex(File& file, bool allowTeX) {
   file.seek(0);
   mdCount = mdCurrent = 0;
+  mdTruncated = false;
   uint32_t pageStart = 0;
   uint8_t row = 0, col = 0;
-  bool lineStart = true, pageHasText = false;
+  bool physicalLineStart = true;
+  bool hasText = false;
+  const uint8_t cols = readerTextCols();
+  const uint8_t rows = readerTextRows();
 
-  while (file.available() && mdCount < MD_MAX_PAGES) {
-    uint32_t pos = file.position();
-    if (lineStart && mdIsTexLine(file)) {
-      if (pageHasText) mdPush(pageStart, pos, 0);
-      // A formula extends to the end of its physical line.
-      while (file.available()) {
-        int c = file.read();
-        if (c == '\n') break;
+  while (file.available()) {
+    if (mdCount >= MD_MAX_PAGES) {
+      mdTruncated = true;
+      break;
+    }
+
+    const uint32_t pos = file.position();
+    if (allowTeX && physicalLineStart && mdIsTexLine(file)) {
+      if (hasText) mdPush(pageStart, pos, 0);
+      while (file.available() && file.read() != '\n') {
+        yield();
       }
       mdPush(pos, file.position(), 1);
       pageStart = file.position();
       row = col = 0;
-      pageHasText = false;
-      lineStart = true;
+      hasText = false;
+      physicalLineStart = true;
       continue;
     }
 
-    int value = file.read();
-    if (value < 0) break;
-    uint8_t c = (uint8_t)value;
-    if (c == '\r') continue;
-    pageHasText = true;
-    if (c == '\n') {
-      row++;
+    const uint32_t cp = mdReadCodepoint(file);
+    if (cp == '\r') continue;
+    if (cp == '\n') {
+      ++row;
       col = 0;
-      lineStart = true;
-    } else {
-      uint8_t extra = mdUtf8Bytes(c) - 1;
-      while (extra-- && file.available()) file.read();
-      lineStart = false;
-      col++;
-      if (col >= MD_COLS) {
-        col = 0;
-        row++;
+      hasText = true;
+      physicalLineStart = true;
+      if (row >= rows) {
+        mdPush(pageStart, file.position(), 0);
+        pageStart = file.position();
+        row = col = 0;
+        hasText = false;
+      }
+      continue;
+    }
+
+    physicalLineStart = false;
+    // Defer wrap until the following printable character. A newline at
+    // exactly column 21/25/32 must not produce an additional empty row.
+    if (col >= cols) {
+      ++row;
+      col = 0;
+      if (row >= rows) {
+        file.seek(pos);            // glyph belongs to the next page
+        mdPush(pageStart, pos, 0);
+        pageStart = pos;
+        row = 0;
+        hasText = false;
+        continue;
       }
     }
-    if (row >= MD_ROWS) {
-      mdPush(pageStart, file.position(), 0);
-      pageStart = file.position();
-      row = col = 0;
-      pageHasText = false;
-    }
+    ++col;
+    hasText = true;
     yield();
   }
-  if (pageHasText && mdCount < MD_MAX_PAGES) mdPush(pageStart, file.position(), 0);
+  if (hasText && mdCount < MD_MAX_PAGES) {
+    mdPush(pageStart, file.position(), 0);
+  }
 }
 
 static void mdDrawText(File& file, uint16_t index) {
   const MdPage& page = mdPages[index];
   file.seek(page.start);
-  oled.autoPrintln(false);
   oled.clear();
   oled.home();
+  oled.autoPrintln(false);
+  const uint8_t cols = readerTextCols();
+  const uint8_t rows = readerTextRows();
+  const uint8_t width = readerTextWidth();
+  const uint8_t height = readerTextHeight();
   uint8_t row = 0, col = 0;
-  while (file.position() < page.end && row < MD_ROWS) {
-    int value = file.read();
-    if (value < 0) break;
-    uint8_t c = (uint8_t)value;
-    if (c == '\r') continue;
-    if (c == '\n') {
-      row++;
+
+  while (file.position() < page.end && row < rows) {
+    uint32_t cp = mdReadCodepoint(file);
+    if (cp == '\r') continue;
+    if (cp == '\n') {
+      ++row;
       col = 0;
-      if (row < MD_ROWS) oled.setCursor(0, row);
+      if (readerFontMode == 0 && row < rows) oled.setCursor(0, row);
       continue;
     }
-    // Emit the complete UTF-8 codepoint before advancing cursor, so a
-    // multibyte Cyrillic glyph cannot be cut at a page boundary.
-    oled.write(c);
-    uint8_t extra = mdUtf8Bytes(c) - 1;
-    while (extra-- && file.position() < page.end) oled.write(file.read());
-    col++;
-    if (col >= MD_COLS) {
+    if (col >= cols) {
+      ++row;
       col = 0;
-      row++;
-      if (row < MD_ROWS) oled.setCursor(0, row);
+      if (readerFontMode == 0 && row < rows) oled.setCursor(0, row);
+      if (row >= rows) break;
     }
+    if (readerFontMode == 0) {
+      readerWriteStandardGlyph(cp);
+    } else {
+      readerDrawCompactGlyph(cp, col * width, row * height);
+    }
+    ++col;
+    yield();
   }
   oled.update();
   oled.autoPrintln(true);
@@ -138,7 +171,7 @@ static void mdDrawFormula(File& file, uint16_t index) {
   const MdPage& page = mdPages[index];
   file.seek(page.start);
   String formula = file.readStringUntil('\n');
-  formula.remove(0, 4);      // remove "tex:"
+  formula.remove(0, 4);              // discard "tex:" prefix
   formula.trim();
   memset(texLines, 0, sizeof(texLines));
   strncpy(texLines[0], formula.c_str(), TEX_LINE_LEN - 1);
@@ -162,7 +195,7 @@ static void mdDrawCurrent(File& file) {
   else mdDrawText(file, mdCurrent);
 }
 
-void enterToReadMdFile(void) {
+void enterToReadTextFile(bool allowTeX) {
   File file = LittleFS.open("/" + selectedFile, "r");
   if (!file) {
     fileReadError();
@@ -170,7 +203,9 @@ void enterToReadMdFile(void) {
     drawMainMenu();
     return;
   }
-  mdIndex(file);
+
+  // On every file open, index its exact byte offsets using the saved profile.
+  mdIndex(file, allowTeX);
   if (!mdCount) {
     file.close();
     texReleasePool();
@@ -182,15 +217,19 @@ void enterToReadMdFile(void) {
     up.tick();
     ok.tick();
     down.tick();
-    if (ok.hold()) {
-      waitOkRelease();
+
+    const bool exitReader = allowTeX ? ok.hold() : ok.click();
+    if (exitReader) {
+      if (allowTeX) waitOkRelease();
       uiTimer = millis();
-      drawMainMenu();
       file.close();
       texReleasePool();
+      drawMainMenu();
       return;
     }
-    if (ok.click() && mdPages[mdCurrent].kind == 1 && (texMaxX || texMaxY)) {
+
+    if (allowTeX && ok.click() && mdPages[mdCurrent].kind == 1 &&
+        (texMaxX || texMaxY)) {
       uiTimer = millis();
       if (texMode == TM_PAGE) texMode = texMaxY ? TM_VERT : TM_HORZ;
       else if (texMode == TM_VERT) texMode = texMaxX ? TM_HORZ : TM_PAGE;
@@ -200,19 +239,28 @@ void enterToReadMdFile(void) {
       texDrawStatus(mdCurrent + 1, mdCount);
       oled.update();
     }
+
     int8_t direction = 0;
     if (up.click() || up.step()) direction = -1;
     if (down.click() || down.step()) direction = 1;
     if (direction) {
       uiTimer = millis();
-      if (mdPages[mdCurrent].kind == 1 && texMode == TM_VERT) {
+      if (allowTeX && mdPages[mdCurrent].kind == 1 &&
+          texMode == TM_VERT) {
         texScrollY = constrain(texScrollY + direction * 8, 0, texMaxY);
-        oled.clear(); texDrawBody(""); texDrawStatus(mdCurrent + 1, mdCount); oled.update();
-      } else if (mdPages[mdCurrent].kind == 1 && texMode == TM_HORZ) {
+        oled.clear();
+        texDrawBody("");
+        texDrawStatus(mdCurrent + 1, mdCount);
+        oled.update();
+      } else if (allowTeX && mdPages[mdCurrent].kind == 1 &&
+                 texMode == TM_HORZ) {
         texScrollX = constrain(texScrollX + direction * 8, 0, texMaxX);
-        oled.clear(); texDrawBody(""); texDrawStatus(mdCurrent + 1, mdCount); oled.update();
+        oled.clear();
+        texDrawBody("");
+        texDrawStatus(mdCurrent + 1, mdCount);
+        oled.update();
       } else {
-        int next = (int)mdCurrent + direction;
+        const int next = (int)mdCurrent + direction;
         if (next >= 0 && next < mdCount) {
           mdCurrent = next;
           mdDrawCurrent(file);
@@ -221,4 +269,8 @@ void enterToReadMdFile(void) {
     }
     yield();
   }
+}
+
+void enterToReadMdFile(void) {
+  enterToReadTextFile(true);
 }
