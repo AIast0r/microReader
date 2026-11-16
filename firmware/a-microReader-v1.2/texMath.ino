@@ -78,16 +78,26 @@ static char texNames[TEX_MAX_PAGES][TEX_NAME_BYTES];
 static uint8_t texNameCount = 0;
 
 // ------------------ пул нод ------------------
-static TexNode texPool[TEX_POOL];
+// Allocate the parse tree only while a math document is open. ESP8266
+// needs its heap for Wi-Fi/GyverPortal when the reader is in Wi-Fi mode.
+static TexNode* texPool = nullptr;
+static bool texEnsurePool() {
+  if (!texPool) texPool = (TexNode*)malloc(sizeof(TexNode) * TEX_POOL);
+  return texPool != nullptr;
+}
+static void texReleasePool() {
+  if (texPool) free(texPool);
+  texPool = nullptr;
+}
 static uint16_t texPoolUsed = 0;
 static bool texOom = false;
 static TexNode texSink;
 
-static void texResetPool() { texPoolUsed = 0; texOom = false; }
+static void texResetPool() { texPoolUsed = 0; texOom = !texEnsurePool(); }
 
 static TexNode* texAlloc() {
   TexNode* n;
-  if (texPoolUsed >= TEX_POOL) { texOom = true; n = &texSink; }   // страница не будет рисоваться
+  if (!texPool || texPoolUsed >= TEX_POOL) { texOom = true; n = &texSink; }   // страница не будет рисоваться
   else n = &texPool[texPoolUsed++];
   memset(n, 0, sizeof(TexNode));
   return n;
@@ -981,6 +991,7 @@ void enterToReadTexFile(void) {
       uiTimer = millis();
       drawMainMenu();
       file.close();
+      texReleasePool();
       return;
     }
     if (ok.click() && (texMaxX || texMaxY)) {          // страницы -> верт. -> гориз.
