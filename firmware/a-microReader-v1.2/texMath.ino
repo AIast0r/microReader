@@ -793,6 +793,7 @@ static uint8_t texMode = TM_PAGE;
 static void texParseAll() {
   texResetPool();
   texRows = 0;
+  if (texOom) return;  // no parser heap available
   for (uint8_t i = 0; i < texLineCount; i++) {
     if (!texLines[i][0]) continue;
     const char* src = texLines[i];
