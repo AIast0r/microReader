@@ -33,6 +33,8 @@ static uint16_t deleteAllUserFiles(void) {
 /* ======================================================================= */
 /* ================= Билд веб-страницы + подсос значений ================= */
 void build() {                     // Билд страницы
+  Serial.printf_P(PSTR("[WEB] request BEGIN heap=%u largest=%u frag=%u%%\\n"),
+      ESP.getFreeHeap(), ESP.getMaxFreeBlockSize(), ESP.getHeapFragmentation());
   GP.BUILD_BEGIN(400);             // Ширина колонок
   GP.THEME(GP_DARK);               // Темная тема
   GP.PAGE_TITLE("Wi-Fi Reader");   // Обзываем титл
@@ -64,7 +66,18 @@ void build() {                     // Билд страницы
   M_BLOCK_TAB(                   // Блок с файловым менеджером
     "Файловая система",          // Имя + тип DIV
     GP.FILE_UPLOAD("file_upl");  // Кнопка для загрузки файла
-    GP.FILE_MANAGER(&LittleFS);  // Файловый менеджер
+    // DIAGNOSTIC: temporarily skip the complete filesystem HTML table.
+    // This separates low-heap page generation from Wi-Fi / OTA crashes.
+    // File upload, OTA, settings and confirmed bulk delete still work.
+    GP.LABEL(F("Диагностика: список файлов временно отключён"));
+    GP.BREAK();
+    GP.LABEL(String(F("Файлов в каталоге чтения: ")) + fileCount);
+    GP.BREAK();
+    GP.LABEL(String(F("Свободно RAM: ")) + ESP.getFreeHeap() + F(" байт"));
+    GP.BREAK();
+    GP.LABEL(String(F("Наибольший блок RAM: ")) + ESP.getMaxFreeBlockSize() + F(" байт"));
+    GP.BREAK();
+    GP.LABEL(String(F("Фрагментация RAM: ")) + ESP.getHeapFragmentation() + F("%"));
     GP.HR();
     GP.LABEL("Массовое удаление: только файлы книг и формул. Настройки сохраняются.");
     GP.FORM_BEGIN("/delete_user_files");
@@ -74,6 +87,8 @@ void build() {                     // Билд страницы
     if (lastBulkDeleteCount) GP.LABEL(String("Удалено файлов: ") + lastBulkDeleteCount);
   );
   GP.BUILD_END();                  // Конец билда страницы
+  Serial.printf_P(PSTR("[WEB] request END heap=%u largest=%u frag=%u%%\\n"),
+      ESP.getFreeHeap(), ESP.getMaxFreeBlockSize(), ESP.getHeapFragmentation());
 }
 
 void action(GyverPortal& p) {      // Подсос значений со страницы
