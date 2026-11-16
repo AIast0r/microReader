@@ -4,7 +4,7 @@ static uint16_t lastBulkDeleteCount = 0;
 // Не затрагиваем внутренний /data.dat с настройками и рекордами игр.
 // На удаление допускаем только читаемые пользовательские файлы.
 static bool isUserFileToDelete(const String& path) {
-  return path.endsWith(".txt") || path.endsWith(".tex") ||
+  return path.endsWith(".txt") || path.endsWith(".md") || path.endsWith(".tex") ||
          path.endsWith(".itxt") || path.endsWith(".h") ||
          path.endsWith(".jpg");
 }
