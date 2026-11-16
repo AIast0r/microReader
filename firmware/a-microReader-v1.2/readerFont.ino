@@ -4,27 +4,22 @@
  * 0: legacy 6x8 = 21 columns x 8 rows
  * 1: compact 5x8 = 25 columns x 8 rows
  * 2: dense   5x7 = 25 columns x 9 rows
- * 3: tiny    4x6 = 32 columns x 10 rows (native Cyrillic/ASCII bitmap)
  *
  * Font selection lives in /font.dat, not in the existing /data.dat structure:
  * changing the original struct would reset existing Wi-Fi/game settings.
  */
-#include "readerTinyFont.h"
-
 uint8_t readerFontMode = 0;
 
 uint8_t readerTextWidth() {
   switch (readerFontMode) {
     case 1:
     case 2: return 5;
-    case 3: return 4;
     default: return 6;
   }
 }
 
 uint8_t readerTextHeight() {
   if (readerFontMode == 2) return 7;
-  if (readerFontMode == 3) return 6;
   return 8;
 }
 
@@ -37,13 +32,13 @@ void readerLoadFont() {
   if (!file) return;
   if (file.available() >= 2 && file.read() == 0xA5) {
     int mode = file.read();
-    if (mode >= 0 && mode <= 3) readerFontMode = (uint8_t)mode;
+    if (mode >= 0 && mode <= 2) readerFontMode = (uint8_t)mode;
   }
   file.close();
 }
 
 bool readerSetFont(uint8_t mode) {
-  if (mode > 3) return false;
+  if (mode > 2) return false;
   if (readerFontMode == mode) return true;
   File file = LittleFS.open("/font.dat", "w");
   if (!file) {
@@ -93,17 +88,6 @@ static uint8_t readerGlyphIndex(uint32_t codepoint) {
 
 void readerDrawCompactGlyph(uint32_t codepoint, uint8_t x, uint8_t y) {
   uint8_t glyph = readerGlyphIndex(codepoint);
-  if (readerFontMode == 3) {
-    // Three ink pixels + one spacer, six high; Cyrillic lives in flash.
-    for (uint8_t col = 0; col < 4; col++) {
-      uint8_t bits = pgm_read_byte(&readerTinyGlyphs[glyph][col]);
-      for (uint8_t row = 0; row < 6; row++) {
-        if (bits & (1U << row)) oled.dot(x + col, y + row, 1);
-      }
-    }
-    return;
-  }
-
   // Four ink columns + one pixel spacing. Preserve narrow letters and digits
   // without touching the default 6x8 menu font or the TeX renderer.
   const uint8_t a = pgm_read_byte(&_charMap[glyph][0]);
