@@ -33,8 +33,8 @@
 #define TEX_LINE_LEN 128     // максимум символов в строке
 #define TEX_NAME_LEN 20      // максимум символов в названии
 #define TEX_NAME_BYTES (TEX_NAME_LEN * 2 + 1) // в UTF-8 буква = до 2 байт
-#define TEX_MAX_PAGES 40     // максимум формул (страниц) в файле
-#define TEX_POOL 240  // ESP8266 SRAM: 240 nodes is sufficient for typical short physics formulae         // максимум нод дерева на страницу
+#define TEX_MAX_PAGES 24     // максимум формул (страниц) в файле
+#define TEX_POOL 160  // ESP8266: small static pool for typical short physics formulae         // максимум нод дерева на страницу
 #include "texFont.h"
 
 // ------------------ типы (ДО автопрототипов Arduino IDE) ------------------
