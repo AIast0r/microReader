@@ -100,7 +100,8 @@ static void mdIndex(File& file) {
   if (pageHasText && mdCount < MD_MAX_PAGES) mdPush(pageStart, file.position(), 0);
 }
 
-static void mdDrawText(File& file, const MdPage& page) {
+static void mdDrawText(File& file, uint16_t index) {
+  const MdPage& page = mdPages[index];
   file.seek(page.start);
   oled.autoPrintln(false);
   oled.clear();
@@ -133,7 +134,8 @@ static void mdDrawText(File& file, const MdPage& page) {
   oled.autoPrintln(true);
 }
 
-static void mdDrawFormula(File& file, const MdPage& page) {
+static void mdDrawFormula(File& file, uint16_t index) {
+  const MdPage& page = mdPages[index];
   file.seek(page.start);
   String formula = file.readStringUntil('\n');
   formula.remove(0, 4);      // remove "tex:"
@@ -156,8 +158,8 @@ static void mdDrawFormula(File& file, const MdPage& page) {
 
 static void mdDrawCurrent(File& file) {
   if (mdCurrent >= mdCount) return;
-  if (mdPages[mdCurrent].kind == 1) mdDrawFormula(file, mdPages[mdCurrent]);
-  else mdDrawText(file, mdPages[mdCurrent]);
+  if (mdPages[mdCurrent].kind == 1) mdDrawFormula(file, mdCurrent);
+  else mdDrawText(file, mdCurrent);
 }
 
 void enterToReadMdFile(void) {
