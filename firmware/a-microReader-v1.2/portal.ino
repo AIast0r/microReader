@@ -175,6 +175,36 @@ static void readerFilesPage() {
   GP.BUILD_END();
 }
 
+// CSS/JS preview is stored in flash and rendered by the browser, not ESP RAM.
+static const char readerFontPreviewHtml[] PROGMEM = R"PREV(
+<style>
+.rf-font-preview{width:100%;max-width:280px;margin:6px auto 10px;box-sizing:border-box;padding:7px;border-radius:8px;background:#10151a}
+.rf-font-preview pre{font-family:monospace;white-space:pre;margin:0;width:100%;height:88px;overflow:hidden;color:#b2f4d2;font-size:11px;line-height:15px;text-align:left;box-sizing:border-box}
+.rf-font-preview small{display:block;color:#a9b2bd;text-align:center;font-size:11px}
+</style>
+<div class="rf-font-preview"><small>Пример масштаба (условный)</small>
+<pre id="rf-font-example">Термодинамическое
+равновесие означает,
+что параметры газа
+не меняются.
+pV = nRT
+Температура: T, K.
+Энергия: U = 3nRT/2
+Давление: p = F/S</pre></div>
+<script>
+(function(){
+ var sel=document.getElementById('readerFont'), demo=document.getElementById('rf-font-example');
+ if(!sel||!demo)return;
+ function preview(){
+  var n=Number(sel.value)||0;
+  demo.style.fontSize=[11,10,10,8][n]+'px';
+  demo.style.lineHeight=[15,15,13,11][n]+'px';
+ }
+ sel.addEventListener('change',preview);preview();
+})();
+</script>
+)PREV";
+
 /* ======================================================================= */
 /* ================= Билд веб-страницы + подсос значений ================= */
 void build() {                     // Билд страницы
@@ -206,7 +236,10 @@ void build() {                     // Билд страницы
       "Другое",             // Имя + тип DIV
       M_BOX(GP_CENTER, GP.LABEL("Режим левши"); GP.SWITCH("leftEn", sets.leftmode);); GP.BREAK();
       M_BOX(GP_CENTER, GP.LABEL("Размер сегмента игр"); GP.NUMBER("tetrSeg", "", sets.tetrisSegment);); GP.BREAK(); // размер сегмента
-      M_BOX(GP_CENTER, GP.LABEL("Яркость"); GP.SLIDER("con", sets.dispContrast, 10, 100););););
+      M_BOX(GP_CENTER, GP.LABEL("Яркость"); GP.SLIDER("con", sets.dispContrast, 10, 100);); GP.BREAK();
+      GP.LABEL(F("Размер шрифта при чтении"));
+      GP.SELECT(F("readerFont"), F("6x8 (21x8),5x8 (25x8),5x7 (25x9),4x6 (32x10)"), readerFontMode);
+      GP.SEND_P(readerFontPreviewHtml);););
   GP.FORM_END();                 // <- Конец формы (костыль)
   M_BLOCK_TAB(                   // Блок с OTA-апдейтом
     "Обновление прошивки",       // Имя + тип DIV
@@ -244,13 +277,26 @@ void build() {                     // Билд страницы
 }
 
 void action(GyverPortal& p) {      // Подсос значений со страницы
+  if (p.click("readerFont")) {
+    int requested = readerFontMode;
+    if (p.copyInt("readerFont", requested) && requested >= 0 && requested <= 3) {
+      readerSetFont((uint8_t)requested);
+    }
+  }
+
   if (p.form("/delete_user_files")) {
     bool confirmed = false;
     p.copyBool("confirm_delete", confirmed);
     if (confirmed) lastBulkDeleteCount = deleteAllUserFiles();
   }
 
-  if (p.form("/cfg")) {            // Если есть сабмит формы - копируем все в переменные
+  if (p.form("/cfg")) {
+    int fontFromForm = readerFontMode;
+    if (p.copyInt("readerFont", fontFromForm) &&
+        fontFromForm >= 0 && fontFromForm <= 3) {
+      readerSetFont((uint8_t)fontFromForm);
+    }
+            // Если есть сабмит формы - копируем все в переменные
     p.copyStr("apSsid", sets.apSsid);
     p.copyStr("apPass", sets.apPass);
     p.copyStr("staSsid", sets.staSsid);
