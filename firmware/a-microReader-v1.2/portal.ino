@@ -33,7 +33,7 @@ static uint16_t deleteAllUserFiles(void) {
 /* ======================================================================= */
 /* ================= Билд веб-страницы + подсос значений ================= */
 void build() {                     // Билд страницы
-  Serial.printf_P(PSTR("[WEB] request BEGIN heap=%u largest=%u frag=%u%%\\n"),
+  Serial.printf_P(PSTR("[WEB] request BEGIN heap=%u largest=%u frag=%u%%\n"),
       ESP.getFreeHeap(), ESP.getMaxFreeBlockSize(), ESP.getHeapFragmentation());
   GP.BUILD_BEGIN(400);             // Ширина колонок
   GP.THEME(GP_DARK);               // Темная тема
@@ -87,7 +87,7 @@ void build() {                     // Билд страницы
     if (lastBulkDeleteCount) GP.LABEL(String("Удалено файлов: ") + lastBulkDeleteCount);
   );
   GP.BUILD_END();                  // Конец билда страницы
-  Serial.printf_P(PSTR("[WEB] request END heap=%u largest=%u frag=%u%%\\n"),
+  Serial.printf_P(PSTR("[WEB] request END heap=%u largest=%u frag=%u%%\n"),
       ESP.getFreeHeap(), ESP.getMaxFreeBlockSize(), ESP.getHeapFragmentation());
 }
 
