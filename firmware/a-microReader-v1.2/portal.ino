@@ -324,8 +324,8 @@ pV = nRT
  if(!sel||!demo)return;
  function preview(){
   var n=Number(sel.value)||0;
-  demo.style.fontSize=[11,10,10,8][n]+'px';
-  demo.style.lineHeight=[15,15,13,11][n]+'px';
+  demo.style.fontSize=[11,10,10][n]+'px';
+  demo.style.lineHeight=[15,15,13][n]+'px';
  }
  sel.addEventListener('change',preview);preview();
 })();
@@ -369,7 +369,7 @@ void build() {                     // Билд страницы
       M_BOX(GP_CENTER, GP.LABEL("Размер сегмента игр"); GP.NUMBER("tetrSeg", "", sets.tetrisSegment);); GP.BREAK(); // размер сегмента
       M_BOX(GP_CENTER, GP.LABEL("Яркость"); GP.SLIDER("con", sets.dispContrast, 10, 100);); GP.BREAK();
       GP.LABEL(F("Размер шрифта при чтении"));
-      GP.SELECT(F("readerFont"), F("6x8 (21x8),5x8 (25x8),5x7 (25x9),4x6 (32x10)"), readerFontMode);
+      GP.SELECT(F("readerFont"), F("6x8 (21x8),5x8 (25x8),5x7 (25x9)"), readerFontMode);
       GP.SEND_P(readerFontPreviewHtml);););
   GP.FORM_END();                 // <- Конец формы (костыль)
   M_BLOCK_TAB(                   // Блок с OTA-апдейтом
@@ -412,7 +412,7 @@ void build() {                     // Билд страницы
 void action(GyverPortal& p) {      // Подсос значений со страницы
   if (p.click("readerFont")) {
     int requested = readerFontMode;
-    if (p.copyInt("readerFont", requested) && requested >= 0 && requested <= 3)
+    if (p.copyInt("readerFont", requested) && requested >= 0 && requested <= 2)
       readerSetFont((uint8_t)requested);
   }
 
@@ -436,7 +436,7 @@ void action(GyverPortal& p) {      // Подсос значений со стр�
   if (p.form("/cfg")) {
     int fontFromForm = readerFontMode;
     if (p.copyInt("readerFont", fontFromForm) &&
-        fontFromForm >= 0 && fontFromForm <= 3)
+        fontFromForm >= 0 && fontFromForm <= 2)
       readerSetFont((uint8_t)fontFromForm);
             // Если есть сабмит формы - копируем все в переменные
     p.copyStr("apSsid", sets.apSsid);
