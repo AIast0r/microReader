@@ -101,6 +101,8 @@ void enterToReadTexFile(void);  // TeX-формулы из .tex (порт с ESP
 void enterToReadMdFile(void);   // текст и TeX-формулы в одном .md
 void enterToReadTextFile(bool allowTeX); // shared TXT/MD reader
 void readerLoadFont(void);              // read /font.dat after LittleFS mounts
+extern uint8_t readerFontMode;            // selected font mode, separate from sets
+bool readerSetFont(uint8_t mode);        // handle web setting without changing data.dat
 void waitOkRelease(void);      // защита от повторного срабатывания удержания OK
 
 void setup() {
