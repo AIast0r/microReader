@@ -286,6 +286,22 @@ static void readerFileChunk() {
   GP.SEND(F("'></span>"));
 }
 
+// Apply left-hand mode immediately without a reboot. The original code only
+// applied OLED rotation and button remapping in setup(), so web changes
+// appeared to do nothing until the next power cycle.
+static void applyLeftHandedMode() {
+  oled.flipH(sets.leftmode);
+  oled.flipV(sets.leftmode);
+
+  up = Button(sets.leftmode ? DWN_BTN_PIN : UP_BTN_PIN);
+  down = Button(sets.leftmode ? UP_BTN_PIN : DWN_BTN_PIN);
+  up.setHoldTimeout(1500);
+  up.setStepTimeout(100);
+  down.setStepTimeout(100);
+
+  Serial.printf_P(PSTR("[CFG] left-hand mode=%u\n"), (unsigned)sets.leftmode);
+}
+
 /* ======================================================================= */
 /* ================= Билд веб-страницы + подсос значений ================= */
 void build() {                     // Билд страницы
@@ -361,6 +377,17 @@ void build() {                     // Билд страницы
 }
 
 void action(GyverPortal& p) {      // Подсос значений со страницы
+  // GP.SWITCH() uses /GP_click when toggled. Process it immediately rather
+  // than relying on an unrelated form submission.
+  if (p.click("leftEn")) {
+    bool requested = sets.leftmode;
+    if (p.copyBool("leftEn", requested) && requested != sets.leftmode) {
+      sets.leftmode = requested;
+      applyLeftHandedMode();
+      data.update();  // delayed LittleFS write, as for other settings
+    }
+  }
+
   if (p.form("/delete_user_files")) {
     bool confirmed = false;
     p.copyBool("confirm_delete", confirmed);
@@ -373,7 +400,9 @@ void action(GyverPortal& p) {      // Подсос значений со стр�
     p.copyStr("staSsid", sets.staSsid);
     p.copyStr("staPass", sets.staPass);
     p.copyBool("staEn", sets.staModeEn);
+    const bool previousLeftMode = sets.leftmode;
     p.copyBool("leftEn", sets.leftmode);
+    if (previousLeftMode != sets.leftmode) applyLeftHandedMode();
     p.copyInt("con", sets.dispContrast);
     byte con = map(sets.dispContrast, 10, 100, 1, 255);
     oled.setContrast(con);            // Тут же задаем яркость оледа
